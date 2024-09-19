@@ -1,0 +1,8 @@
+anthropic
+python-dotenv
+# system install portaudio
+pyaudio
+speechrecognition
+pyttsx3
+elevenlabs
+pydub
