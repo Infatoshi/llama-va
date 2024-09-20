@@ -34,6 +34,7 @@ recognizer = sr.Recognizer()
 
 # Constants
 WAKE_WORD = "lucy"
+WAKE_WORD_WAIT_TIME=10
 VOICE_ID = "pMsXgVXv3BLzUgSXRplE"
 MODEL = "llama3-70b-8192"
 
@@ -45,6 +46,7 @@ initial_context = [
     }
 ]
 context_window = initial_context.copy()
+WAKE_WORD_WAIT_TIME=20
 
 def play_audio_stream(audio_stream):
     # Initialize PyAudio
@@ -90,7 +92,7 @@ def get_audio_input():
                 play_tts_response("Yes?")
                 
                 with sr.Microphone() as source:
-                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
+                    audio = recognizer.listen(source, timeout=WAKE_WORD_WAIT_TIME, phrase_time_limit=20)
                 main_input = recognizer.recognize_google(audio)
                 logging.info("User said: %s", main_input)
                 return main_input
