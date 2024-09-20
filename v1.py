@@ -60,7 +60,7 @@ def get_audio_input():
             except sr.RequestError as e:
                 print(f"Could not request results from Google Speech Recognition service; {e}")
                 return None
-        elif "restart" or "reset" in text:
+        elif ("restart" or "reset" in text) and ():
             return "restart"
     except sr.UnknownValueError:
         return None  # Continue listening if the wake word is not detected
