@@ -46,7 +46,6 @@ initial_context = [
     }
 ]
 context_window = initial_context.copy()
-WAKE_WORD_WAIT_TIME=20
 
 def play_audio_stream(audio_stream):
     # Initialize PyAudio
@@ -78,33 +77,38 @@ def play_audio_stream(audio_stream):
     stream.close()
     p.terminate()
 
-def get_audio_input():
-    logging.info("Listening for wake word '%s'...", WAKE_WORD)
-    while True:
-        try:
-            with sr.Microphone() as source:
-                recognizer.adjust_for_ambient_noise(source, duration=1)
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
-            
-            text = recognizer.recognize_google(audio).lower()
+def get_audio_input(wait_for_wake_word=True):
+    if wait_for_wake_word:
+        logging.info("Listening for wake word '%s'...", WAKE_WORD)
+    else:
+        logging.info("Listening for user input...")
+
+    try:
+        with sr.Microphone() as source:
+            recognizer.adjust_for_ambient_noise(source, duration=1)
+            audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
+        
+        text = recognizer.recognize_google(audio).lower()
+        
+        if wait_for_wake_word:
             if WAKE_WORD in text:
-                logging.info("Wake word detected. Listening for main input...")
-                play_tts_response("Yes?")
-                
-                with sr.Microphone() as source:
-                    audio = recognizer.listen(source, timeout=WAKE_WORD_WAIT_TIME, phrase_time_limit=20)
-                main_input = recognizer.recognize_google(audio)
-                logging.info("User said: %s", main_input)
-                return main_input
+                logging.info("Wake word detected. Starting conversation...")
+                play_tts_response("Yes, how can I help you?")
+                return get_audio_input(wait_for_wake_word=False)
             elif "restart" in text or "reset" in text:
                 return "restart"
-        except sr.WaitTimeoutError:
-            logging.warning("Listening timed out. Trying again...")
-        except sr.UnknownValueError:
-            logging.warning("Didn't catch that. Please try again.")
-        except sr.RequestError as e:
-            logging.error("Could not request results from Google Speech Recognition service: %s", e)
-            return None
+        else:
+            logging.info("User said: %s", text)
+            return text
+    except sr.WaitTimeoutError:
+        logging.warning("Listening timed out. Reverting to wake word mode.")
+        return None
+    except sr.UnknownValueError:
+        logging.warning("Didn't catch that. Please try again.")
+        return get_audio_input(wait_for_wake_word)
+    except sr.RequestError as e:
+        logging.error("Could not request results from Google Speech Recognition service: %s", e)
+        return None
 
 def play_tts_response(text):
     audio_stream = elevenlabs_client.text_to_speech.convert_as_stream(
@@ -112,6 +116,7 @@ def play_tts_response(text):
         optimize_streaming_latency="0",
         output_format="mp3_22050_32",
         text=text,
+        model_id="eleven_turbo_v2",
         voice_settings=VoiceSettings(
             stability=0.1,
             similarity_boost=0.3,
@@ -122,13 +127,15 @@ def play_tts_response(text):
 
 # Main conversation loop
 try:
+    wait_for_wake_word = True
     while True:
-        user_input = get_audio_input()
+        user_input = get_audio_input(wait_for_wake_word)
         if user_input:
             if user_input.lower() == "restart":
                 logging.info("Restarting the conversation...")
                 context_window = [context_window[0]]
                 response_text = "I just cleared the context window"
+                wait_for_wake_word = True
             else:
                 context_window.append({"role": "user", "content": user_input})
                 
@@ -144,10 +151,9 @@ try:
                 logging.info("Assistant said: %s", response_text)
             
             play_tts_response(response_text)
-            
-            print(f"You said: {user_input}")
+            wait_for_wake_word = False
         else:
-            logging.warning("No valid input received. Listening again...")
+            wait_for_wake_word = True
 
 except KeyboardInterrupt:
     logging.info("Exiting the conversation loop.")
