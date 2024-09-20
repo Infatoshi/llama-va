@@ -15,13 +15,6 @@ import pyaudio
 import io
 from pydub import AudioSegment
 
-import torch
-from parler_tts import ParlerTTSForConditionalGeneration
-from transformers import AutoTokenizer
-import soundfile as sf
-import sounddevice as sd
-import numpy as np
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -42,7 +35,7 @@ recognizer = sr.Recognizer()
 # Constants
 WAKE_WORD = "lucy"
 WAKE_WORD_WAIT_TIME=10
-VOICE_ID = "pMsXgVXv3BLzUgSXRplE"
+VOICE_ID = "cgSgspJ2msm6clMCkdW9"
 MODEL = "llama3-70b-8192"
 
 # Initialize the context window
@@ -54,27 +47,35 @@ initial_context = [
 ]
 context_window = initial_context.copy()
 
-# Initialize Parler TTS
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-model = ParlerTTSForConditionalGeneration.from_pretrained("parler-tts/parler-tts-mini-v1").to(device)
-tokenizer = AutoTokenizer.from_pretrained("parler-tts/parler-tts-mini-v1")
+def play_audio_stream(audio_stream):
+    # Initialize PyAudio
+    p = pyaudio.PyAudio()
 
-# Pre-tokenize the description
-description = "Laura takes her time while speaking. She is gentle with her words is expressive for punctation. No background noise."
-input_ids = tokenizer(description, return_tensors="pt").input_ids.to(device)
+    # Collect all chunks into a single bytes object
+    audio_data = b''.join(chunk for chunk in audio_stream)
 
-def generate_audio(prompt):
-    prompt_input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
-    
-    with torch.no_grad():
-        generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids)
-    
-    audio_arr = generation.cpu().numpy().squeeze()
-    return audio_arr
+    # Convert MP3 to raw PCM audio
+    audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
+    raw_data = audio.raw_data
 
-def play_audio(audio_arr, sample_rate):
-    sd.play(audio_arr, sample_rate)
-    sd.wait()
+    # Open a stream
+    stream = p.open(format=p.get_format_from_width(audio.sample_width),
+                    channels=audio.channels,
+                    rate=audio.frame_rate,
+                    output=True)
+
+    # Play the audio
+    chunk_size = 1024
+    offset = 0
+    while offset < len(raw_data):
+        chunk = raw_data[offset:offset + chunk_size]
+        stream.write(chunk)
+        offset += chunk_size
+
+    # Clean up
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
 
 def get_audio_input(wait_for_wake_word=True):
     if wait_for_wake_word:
@@ -110,8 +111,19 @@ def get_audio_input(wait_for_wake_word=True):
         return None
 
 def play_tts_response(text):
-    audio_arr = generate_audio(text)
-    play_audio(audio_arr, model.config.sampling_rate)
+    audio_stream = elevenlabs_client.text_to_speech.convert_as_stream(
+        voice_id=VOICE_ID,
+        optimize_streaming_latency="0",
+        output_format="mp3_22050_32",
+        text=text,
+        model_id="eleven_turbo_v2_5",
+        voice_settings=VoiceSettings(
+            stability=0.1,
+            similarity_boost=0.3,
+            style=0.2,
+        ),
+    )
+    play_audio_stream(audio_stream)
 
 # Main conversation loop
 try:
