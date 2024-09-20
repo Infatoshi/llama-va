@@ -38,36 +38,6 @@ initial_context = [
 ]
 context_window = initial_context.copy()
 
-def get_audio_input():
-    print("Listening for wake word 'llama'...")
-    with sr.Microphone(device_index=None) as source:
-        recognizer.adjust_for_ambient_noise(source, duration=1)
-        audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
-    try:
-        text = recognizer.recognize_google(audio).lower()
-        if "llama" in text:
-            print("Wake word detected. What would you like to say?")
-            with sr.Microphone(device_index=None) as source:
-                recognizer.adjust_for_ambient_noise(source, duration=1)
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
-            try:
-                main_input = recognizer.recognize_google(audio)
-                print(f"You said: {main_input}")
-                return main_input
-            except sr.UnknownValueError:
-                print("Sorry, I couldn't understand that.")
-                return None
-            except sr.RequestError as e:
-                print(f"Could not request results from Google Speech Recognition service; {e}")
-                return None
-        elif ("restart" or "reset" in text) and ():
-            return "restart"
-    except sr.UnknownValueError:
-        return None  # Continue listening if the wake word is not detected
-    except sr.RequestError as e:
-        print(f"Could not request results from Google Speech Recognition service; {e}")
-        return None
-
 def play_audio_stream(audio_stream):
     # Initialize PyAudio
     p = pyaudio.PyAudio()
@@ -97,6 +67,56 @@ def play_audio_stream(audio_stream):
     stream.stop_stream()
     stream.close()
     p.terminate()
+
+def get_audio_input():
+    print("Listening for wake word 'llama'...")
+    while True:
+        try:
+            with sr.Microphone(device_index=None) as source:
+                recognizer.adjust_for_ambient_noise(source, duration=1)
+                audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
+            
+            text = recognizer.recognize_google(audio).lower()
+            if "llama" in text:
+                print("Wake word detected. What would you like to say?")
+                # GREETING
+                # Stream the TTS audio
+                audio_stream = elevenlabs_client.text_to_speech.convert_as_stream(
+                    voice_id="pMsXgVXv3BLzUgSXRplE",
+                    optimize_streaming_latency="0",
+                    output_format="mp3_22050_32",
+                    text="Yes?",
+                    voice_settings=VoiceSettings(
+                        stability=0.1,
+                        similarity_boost=0.3,
+                        style=0.2,
+                    ),
+                )
+                # Play the audio stream
+                play_audio_stream(audio_stream)
+                
+                with sr.Microphone(device_index=None) as source:
+                    recognizer.adjust_for_ambient_noise(source, duration=1)
+                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
+                try:
+                    main_input = recognizer.recognize_google(audio)
+                    print(f"You said: {main_input}")
+                    return main_input
+                except sr.UnknownValueError:
+                    print("Sorry, I couldn't understand that.")
+                except sr.RequestError as e:
+                    print(f"Could not request results from Google Speech Recognition service; {e}")
+            elif "restart" in text or "reset" in text:
+                return "restart"
+        except sr.WaitTimeoutError:
+            print("Listening timed out. Trying again...")
+        except sr.UnknownValueError:
+            print("Didn't catch that. Please try again.")
+        except sr.RequestError as e:
+            print(f"Could not request results from Google Speech Recognition service; {e}")
+            return None
+
+
 
 # Main conversation loop
 try:
