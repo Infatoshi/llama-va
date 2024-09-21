@@ -14,6 +14,9 @@ from groq import Groq
 import pyaudio
 import io
 from pydub import AudioSegment
+import base64
+from PIL import Image
+import cv2
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -99,6 +102,8 @@ def get_audio_input(wait_for_wake_word=True):
                 return "restart"
         else:
             logging.info("User said: %s", text)
+            if "look at" in text or "what do you see" or "picture" or "image" or "photo" in text:
+                return "vision_request"
             return text
     except sr.WaitTimeoutError:
         logging.warning("Listening timed out. Reverting to wake word mode.")
@@ -109,6 +114,21 @@ def get_audio_input(wait_for_wake_word=True):
     except sr.RequestError as e:
         logging.error("Could not request results from Google Speech Recognition service: %s", e)
         return None
+
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
+def capture_image():
+    # Initialize the camera
+    camera = cv2.VideoCapture(0)
+
+    # Capture an image
+    ret, frame = camera.read()
+
+    # Save the image to a temporary file
+    image_path = "temp_image.jpg"
+    cv2.imwrite(image_path, frame)
 
 def play_tts_response(text):
     audio_stream = elevenlabs_client.text_to_speech.convert_as_stream(
@@ -136,6 +156,29 @@ try:
                 context_window = [context_window[0]]
                 response_text = "I just cleared the context window"
                 wait_for_wake_word = True
+            elif user_input == "vision_request":
+                image_path = capture_image()
+                base64_image = encode_image(image_path)
+                
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "What do you see in this image?"},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}",
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                    model="llava-v1.5-7b-4096-preview",
+                )
+                
+                response_text = chat_completion.choices[0].message.content
             else:
                 context_window.append({"role": "user", "content": user_input})
                 

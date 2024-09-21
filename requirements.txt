@@ -6,3 +6,6 @@ speechrecognition
 elevenlabs
 pydub
 groq
+opencv-python
+pillow
+numpy
