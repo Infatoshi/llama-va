@@ -5,6 +5,7 @@ import os
 import random
 import time
 import logging
+import subprocess
 
 import anthropic
 from dotenv import load_dotenv
@@ -14,13 +15,8 @@ from groq import Groq
 import pyaudio
 import io
 from pydub import AudioSegment
-
-import torch
-from parler_tts import ParlerTTSForConditionalGeneration
-from transformers import AutoTokenizer
-import soundfile as sf
-import sounddevice as sd
-import numpy as np
+import base64
+from PIL import Image
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -41,9 +37,12 @@ recognizer = sr.Recognizer()
 
 # Constants
 WAKE_WORD = "lucy"
-WAKE_WORD_WAIT_TIME=10
-VOICE_ID = "pMsXgVXv3BLzUgSXRplE"
+WAKE_WORD_WAIT_TIME = 10
+VOICE_ID = "cgSgspJ2msm6clMCkdW9"
 MODEL = "llama3-70b-8192"
+style=0.1
+stab=0.3
+sim=0.2
 
 # Initialize the context window
 initial_context = [
@@ -54,27 +53,35 @@ initial_context = [
 ]
 context_window = initial_context.copy()
 
-# Initialize Parler TTS
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-model = ParlerTTSForConditionalGeneration.from_pretrained("parler-tts/parler-tts-mini-v1").to(device)
-tokenizer = AutoTokenizer.from_pretrained("parler-tts/parler-tts-mini-v1")
+def play_audio_stream(audio_stream):
+    # Initialize PyAudio
+    p = pyaudio.PyAudio()
 
-# Pre-tokenize the description
-description = "Laura takes her time while speaking. She is gentle with her words is expressive for punctation. No background noise."
-input_ids = tokenizer(description, return_tensors="pt").input_ids.to(device)
+    # Collect all chunks into a single bytes object
+    audio_data = b''.join(chunk for chunk in audio_stream)
 
-def generate_audio(prompt):
-    prompt_input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
-    
-    with torch.no_grad():
-        generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids)
-    
-    audio_arr = generation.cpu().numpy().squeeze()
-    return audio_arr
+    # Convert MP3 to raw PCM audio
+    audio = AudioSegment.from_mp3(io.BytesIO(audio_data))
+    raw_data = audio.raw_data
 
-def play_audio(audio_arr, sample_rate):
-    sd.play(audio_arr, sample_rate)
-    sd.wait()
+    # Open a stream
+    stream = p.open(format=p.get_format_from_width(audio.sample_width),
+                    channels=audio.channels,
+                    rate=audio.frame_rate,
+                    output=True)
+
+    # Play the audio
+    chunk_size = 1024
+    offset = 0
+    while offset < len(raw_data):
+        chunk = raw_data[offset:offset + chunk_size]
+        stream.write(chunk)
+        offset += chunk_size
+
+    # Clean up
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
 
 def get_audio_input(wait_for_wake_word=True):
     if wait_for_wake_word:
@@ -92,12 +99,14 @@ def get_audio_input(wait_for_wake_word=True):
         if wait_for_wake_word:
             if WAKE_WORD in text:
                 logging.info("Wake word detected. Starting conversation...")
-                play_tts_response("Yes, how can I help you?")
+                play_tts_response("Hell yeah! Whats poppin?")
                 return get_audio_input(wait_for_wake_word=False)
             elif "restart" in text or "reset" in text:
                 return "restart"
         else:
             logging.info("User said: %s", text)
+            if "look at" in text or "what do you see" in text or "picture" in text or "image" in text or "photo" in text:
+                return "vision_request" + text
             return text
     except sr.WaitTimeoutError:
         logging.warning("Listening timed out. Reverting to wake word mode.")
@@ -109,9 +118,35 @@ def get_audio_input(wait_for_wake_word=True):
         logging.error("Could not request results from Google Speech Recognition service: %s", e)
         return None
 
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
+def capture_image():
+    # Use fswebcam to capture an image
+    image_path = "image.jpg"
+    try:
+        subprocess.run(["fswebcam", "-r", "1280x720", "--no-banner", image_path], check=True)
+        logging.info(f"Image captured and saved as {image_path}")
+        return image_path
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to capture image: {e}")
+        return None
+
 def play_tts_response(text):
-    audio_arr = generate_audio(text)
-    play_audio(audio_arr, model.config.sampling_rate)
+    audio_stream = elevenlabs_client.text_to_speech.convert_as_stream(
+        voice_id=VOICE_ID,
+        optimize_streaming_latency="2",
+        output_format="mp3_22050_32",
+        text=text,
+        model_id="eleven_turbo_v2_5",
+        voice_settings=VoiceSettings(
+            stability=stab,
+            similarity_boost=sim,
+            style=style,
+        ),
+    )
+    play_audio_stream(audio_stream)
 
 # Main conversation loop
 try:
@@ -124,13 +159,41 @@ try:
                 context_window = [context_window[0]]
                 response_text = "I just cleared the context window"
                 wait_for_wake_word = True
+            elif "vision_request" in user_input:
+                image_path = capture_image()
+                if image_path:
+                    base64_image = encode_image(image_path)
+                    
+                    chat_completion = client.chat.completions.create(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": f"What do you see in this image [image link]? If its text, code, or math, write out as if you were speaking it. Keep this prompt in mind about the image {user_input[14:]}"},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/jpeg;base64,{base64_image}",
+                                        },
+                                    },
+                                ],
+                            }
+                        ],
+                        model="llava-v1.5-7b-4096-preview",
+                    )
+                    
+                    response_text = chat_completion.choices[0].message.content
+                    context_window.append({"role": "user", "content":f"What do you see in this image [image link]? If its text, code, or math, write out as if you were speaking it. Keep this prompt in mind about the image {user_input[14:]}"})
+                    context_window.append({"role": "assistant", "content": response_text})
+                else:
+                    response_text = "I'm sorry, but I couldn't capture an image. Could you please try again?"
             else:
                 context_window.append({"role": "user", "content": user_input})
                 
                 chat_completion = client.chat.completions.create(
                     messages=context_window,
                     model=MODEL,
-                    temperature=0.5,
+                    temperature=0.6,
                     max_tokens=1024,
                 )
                 
