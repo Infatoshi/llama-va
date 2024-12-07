@@ -2,3 +2,10 @@ output.mp3
 .venv
 image.jpg
 __pycache__
+creds.json
+conversation_history.jsonl
+creds-old.json
+read_emails.jsonl
+temp_audio.wav
+token.pickle
+

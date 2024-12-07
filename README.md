@@ -12,10 +12,10 @@ sudo apt install portaudio19-dev clang pulseaudio alsa-utils alsa-tools libasoun
 pip install -r requirements.txt
 ```
 ## TODO
-- record conversations in JSON for future RLHF
+- record conversations in JSON for future RLHF (done)
 - add a GUI w/ 3d avatars (ai waifus)
-- find ways to decrease response time latency
-- training a custom voice model to sound like certain people
-- integrate with microcontrollers to automate home appliances
-- lock doors, turn on lights, etc.
+- find ways to decrease response time latency - output the first sentence as audio while the rest is being generated
+- training a custom voice model to sound like certain people - elevenlabs voice clone...simple
+- integrate with microcontrollers to automate home appliances - idk when this will happen...
+- lock doors, turn on lights, etc - use google home sdk
 

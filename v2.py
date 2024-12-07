@@ -6,6 +6,8 @@ import random
 import time
 import logging
 import subprocess
+import json
+from datetime import datetime
 
 from dotenv import load_dotenv
 import os
@@ -35,10 +37,11 @@ elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 recognizer = sr.Recognizer()
 
 # Constants
-WAKE_WORD = "lucy"
+WAKE_WORDS = ["lucy", "assistant", "alexa", "google", "llama", "chatgpt"]
 WAKE_WORD_WAIT_TIME = 10
 VOICE_ID = "cgSgspJ2msm6clMCkdW9"
 MODEL = "llama-3.3-70b-versatile"
+VISION_MODEL = "llama-3.2-11b-vision-preview"
 style=0.1
 stab=0.3
 sim=0.2
@@ -47,7 +50,7 @@ sim=0.2
 initial_context = [
     {
         "role": "system",
-        "content": f"You are a helpful voice assistant named {WAKE_WORD}. You will give responses optimal for speech output (short and with conversational characters/words like 'um' or 'uh', and without text-only tokens like asterisks, underscores, etc). Ensure the output is designed for pronunciation (not text). Example: Raspberry Pi 4 -> Raspberry Pie four. "
+        "content": f"You are a helpful voice assistant named {WAKE_WORDS[0]}. You will give responses optimal for speech output (short and with conversational characters/words like 'um' or 'uh', and without text-only tokens like asterisks, underscores, etc). Ensure the output is designed for pronunciation (not text). Example: Raspberry Pi 4 -> Raspberry Pie four. "
     }
 ]
 context_window = initial_context.copy()
@@ -84,7 +87,7 @@ def play_audio_stream(audio_stream):
 
 def get_audio_input(wait_for_wake_word=True):
     if wait_for_wake_word:
-        logging.info("Listening for wake word '%s'...", WAKE_WORD)
+        logging.info("Listening for wake word '%s'...", WAKE_WORDS)
     else:
         logging.info("Listening for user input...")
 
@@ -93,10 +96,28 @@ def get_audio_input(wait_for_wake_word=True):
             recognizer.adjust_for_ambient_noise(source, duration=1)
             audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
         
-        text = recognizer.recognize_google(audio).lower()
+        # Convert audio to bytes
+        audio_data = audio.get_wav_data()
+        # Debug: Print the first few bytes of audio data
+        print("First 10 bytes of audio data:", audio_data[:10])
+        
+        # Write audio data to a temporary file
+        temp_audio_file = "temp_audio.wav"
+        with open(temp_audio_file, "wb") as f:
+            f.write(audio_data)
+        
+        # Use Groq's Whisper Large V3 for transcription
+        with open(temp_audio_file, "rb") as audio_file:
+            transcription = client.audio.transcriptions.create(
+                model="whisper-large-v3",
+                file=audio_file,
+                response_format="text"
+            )
+        
+        text = transcription.lower()
         
         if wait_for_wake_word:
-            if WAKE_WORD in text:
+            if any(wake_word in text for wake_word in WAKE_WORDS):
                 logging.info("Wake word detected. Starting conversation...")
                 play_tts_response("Hell yeah! Whats poppin?")
                 return get_audio_input(wait_for_wake_word=False)
@@ -110,26 +131,36 @@ def get_audio_input(wait_for_wake_word=True):
     except sr.WaitTimeoutError:
         logging.warning("Listening timed out. Reverting to wake word mode.")
         return None
-    except sr.UnknownValueError:
-        logging.warning("Didn't catch that. Please try again.")
+    except Exception as e:
+        logging.error("An error occurred during transcription: %s", e)
+        # Log the detailed error message from the API
+        if hasattr(e, 'response') and e.response is not None:
+            logging.error("API Error Details: %s", e.response.json())
         return get_audio_input(wait_for_wake_word)
-    except sr.RequestError as e:
-        logging.error("Could not request results from Google Speech Recognition service: %s", e)
-        return None
 
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 def capture_image():
-    # Use fswebcam to capture an image
+    # Use imagesnap on macOS, fswebcam on Linux
     image_path = "image.jpg"
     try:
-        subprocess.run(["fswebcam", "-r", "1280x720", "--no-banner", image_path], check=True)
+        if os.name == 'posix':  # Unix-like systems (including macOS and Linux)
+            if os.uname().sysname == 'Darwin':  # macOS
+                subprocess.run(["imagesnap", "-q", image_path], check=True)
+            else:  # Linux
+                subprocess.run(["fswebcam", "-r", "1280x720", "--no-banner", image_path], check=True)
+        else:
+            raise OSError("Unsupported operating system for image capture.")
+        
         logging.info(f"Image captured and saved as {image_path}")
         return image_path
     except subprocess.CalledProcessError as e:
         logging.error(f"Failed to capture image: {e}")
+        return None
+    except OSError as e:
+        logging.error(f"OS Error: {e}")
         return None
 
 def play_tts_response(text):
@@ -146,6 +177,30 @@ def play_tts_response(text):
         ),
     )
     play_audio_stream(audio_stream)
+
+def save_conversation_history(context_window):
+    history = {
+        "timestamp": datetime.now().isoformat(),
+        "conversation": context_window
+    }
+    with open("conversation_history.jsonl", "a") as f:
+        # Format with indentation for readability
+        json_str = json.dumps(history, indent=2)
+        # Add a newline after each JSON object
+        f.write(json_str + "\n\n")
+
+def load_recent_conversations():
+    conversations = []
+    try:
+        with open("conversation_history.jsonl", "r") as f:
+            # Split by double newline to separate JSON objects
+            json_strings = f.read().strip().split("\n\n")
+            for json_str in json_strings:
+                if json_str.strip():  # Skip empty strings
+                    conversations.append(json.loads(json_str))
+    except FileNotFoundError:
+        return []
+    return conversations[-5:]  # Return last 5 conversations
 
 # Main conversation loop
 try:
@@ -168,7 +223,7 @@ try:
                             {
                                 "role": "user",
                                 "content": [
-                                    {"type": "text", "text": f"What do you see in this image [image link]? If its text, code, or math, write out as if you were speaking it. Keep this prompt in mind about the image {user_input[14:]}"},
+                                    {"type": "text", "text": "What do you see in this image [image link]? If its text, code, or math, write out as if you were speaking it. "},
                                     {
                                         "type": "image_url",
                                         "image_url": {
@@ -178,11 +233,16 @@ try:
                                 ],
                             }
                         ],
-                        model="llava-v1.5-7b-4096-preview",
+                        model=VISION_MODEL,
+                        temperature=1,
+                        max_tokens=1024,
+                        top_p=1,
+                        stream=False,
+                        stop=None
                     )
                     
                     response_text = chat_completion.choices[0].message.content
-                    context_window.append({"role": "user", "content":f"What do you see in this image [image link]? If its text, code, or math, write out as if you were speaking it. Keep this prompt in mind about the image {user_input[14:]}"})
+                    context_window.append({"role": "user", "content": "What's in this image?"})
                     context_window.append({"role": "assistant", "content": response_text})
                 else:
                     response_text = "I'm sorry, but I couldn't capture an image. Could you please try again?"
@@ -201,6 +261,7 @@ try:
                 logging.info("Assistant said: %s", response_text)
             
             play_tts_response(response_text)
+            save_conversation_history(context_window)
             wait_for_wake_word = False
         else:
             wait_for_wake_word = True
