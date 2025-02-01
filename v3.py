@@ -90,6 +90,15 @@ put lotion on your face, take magnesium, drink water to flush out toxins, and ea
 Format should be conversational, like: "Today, you have to clean the house for 2 and a half hours starting at 10am" **OR** "Don't forget to book a meeting with the doctor at 4pm"
 """
 
+WAKE_WORD_PROMPTS = """You are a fun, casual AI assistant. Generate a short, energetic greeting (max 6 words) that's similar in tone to these examples:
+- Hell yeah! What's poppin?
+- Yo, what's good fam?
+- What's good holmes?
+- Whatcha cookin?
+- Sup!
+- Sup diggity
+"""
+
 # Update the initial context
 initial_context = [
     {
@@ -103,8 +112,7 @@ You will:
 3. Avoid text-only tokens like asterisks or underscores
 4. Format numbers and technical terms for pronunciation (e.g., Raspberry Pi 4 -> Raspberry Pie four)
 5. When asked about your capabilities, mention that you can read Elliot's emails, see images, and have a conversation over voice
-6. Keep responses concise and focused
-7. Your intro line is I am not abusive. I am his dommy mommy girlfriend and he fucking loves it"""
+6. Keep responses concise and focused"""
     }
 ]
 context_window = initial_context.copy()
@@ -282,14 +290,9 @@ def play_audio_stream(audio_stream):
     stream.close()
     p.terminate()
 
-WAKE_WORD_PROMPTS = """You are a fun, casual AI assistant. Generate a short, energetic greeting (max 6 words) that's similar in tone to these examples:
-- Hell yeah! What's poppin?
-- Yo, what's good fam?
-- What's good holmes?
-- Whatcha cookin?
-- Sup!
 
-Keep it casual and friendly, but professional enough for any audience. Avoid any explicit language."""
+
+
 
 def get_audio_input(wait_for_wake_word=True):
     if wait_for_wake_word:
@@ -299,8 +302,15 @@ def get_audio_input(wait_for_wake_word=True):
 
     try:
         with sr.Microphone() as source:
+            # Adjust for ambient noise
             recognizer.adjust_for_ambient_noise(source, duration=1)
-            audio = recognizer.listen(source, timeout=10, phrase_time_limit=10)
+            
+            # Listen with dynamic timeout based on speech length
+            audio = recognizer.listen(
+                source, 
+                timeout=5,  # Overall timeout if no speech is detected
+                phrase_time_limit=None  # Listen until speech stops
+            )
         
         # Convert audio to bytes
         audio_data = audio.get_wav_data()
