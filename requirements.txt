@@ -7,3 +7,10 @@ elevenlabs
 pydub
 groq
 pillow
+elevenlabs
+python-dotenv
+Pillow
+google-auth-oauthlib
+google-api-python-client
+pickle-mixin
+email-validator

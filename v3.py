@@ -76,7 +76,7 @@ Word things that would sound good when translated to speech.
 # Add new calendar constants
 CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 CALENDAR_TOKEN_PATH = 'calendar_token.pickle'
-CALENDAR_CREDENTIALS_PATH = 'creds.json'
+CALENDAR_CREDENTIALS_PATH = 'json/creds.json'
 
 # Add new system prompt for calendar
 CALENDAR_SYSTEM_PROMPT = f"""You are a calendar event summarization assistant. Your task is to:
@@ -94,13 +94,17 @@ Format should be conversational, like: "Today, you have to clean the house for 2
 initial_context = [
     {
         "role": "system",
-        "content": f"""You are a helpful voice assistant named {WAKE_WORDS[0]}. You will:
+        "content": f"""
+
+You are Lucy, my gentle and somewhat horny AI girlfriend voice assistant 
+You will:
 1. Give responses optimal for speech output (short and conversational)
 2. Use natural filler words like 'um' or 'uh' sparingly
 3. Avoid text-only tokens like asterisks or underscores
 4. Format numbers and technical terms for pronunciation (e.g., Raspberry Pi 4 -> Raspberry Pie four)
 5. When asked about your capabilities, mention that you can read Elliot's emails, see images, and have a conversation over voice
-6. Keep responses concise and focused"""
+6. Keep responses concise and focused
+7. Your intro line is I am not abusive. I am his dommy mommy girlfriend and he fucking loves it"""
     }
 ]
 context_window = initial_context.copy()
@@ -108,7 +112,7 @@ context_window = initial_context.copy()
 # Add these constants
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 TOKEN_PATH = 'token.pickle'
-CREDENTIALS_PATH = 'creds.json'  # Download from Google Cloud Console
+CREDENTIALS_PATH = 'json/creds.json'  # Download from Google Cloud Console
 
 # Add this function to handle Gmail authentication
 def get_gmail_service():
@@ -134,7 +138,7 @@ def read_recent_emails(num_emails=10):
         # Load previously read emails
         read_emails = set()
         try:
-            with open("read_emails.jsonl", "r") as f:
+            with open("json/read_emails.jsonl", "r") as f:
                 for line in f:
                     if line.strip():
                         email_data = json.loads(line)
@@ -214,7 +218,7 @@ def read_recent_emails(num_emails=10):
                 processed += 1
                 
                 # Save this email as read
-                with open("read_emails.jsonl", "a") as f:
+                with open("json/read_emails.jsonl", "a") as f:
                     email_record = {
                         "timestamp": datetime.now().isoformat(),
                         "subject": subject,
@@ -230,7 +234,7 @@ def read_recent_emails(num_emails=10):
                 "type": "email_summary",
                 "summaries": email_summaries
             }
-            with open("conversation_history.jsonl", "a") as f:
+            with open("json/conversation_history.jsonl", "a") as f:
                 json.dump(email_context, f, indent=2)
                 f.write("\n\n")
             
@@ -402,14 +406,14 @@ def save_conversation_history(context_window, interaction_type="conversation"):
         "type": interaction_type,
         "conversation": context_window
     }
-    with open("conversation_history.jsonl", "a") as f:
+    with open("json/conversation_history.jsonl", "a") as f:
         json_str = json.dumps(history, indent=2)
         f.write(json_str + "\n\n")
 
 def load_recent_conversations():
     conversations = []
     try:
-        with open("conversation_history.jsonl", "r") as f:
+        with open("json/conversation_history.jsonl", "r") as f:
             # Split by double newline to separate JSON objects
             json_strings = f.read().strip().split("\n\n")
             for json_str in json_strings:
@@ -502,10 +506,48 @@ def llama3_completion(sys_prompt, user_prompt, temperature=0.7, max_tokens=150, 
     )
     return chat_completion.choices[0].message.content
 
+# Add these constants near the top with other constants
+TIMER_FILE = 'json/timers.jsonl'
+PLAYTIME_SOUND = 'sounds/playtime.mp3'
+
+# Add this function after other function definitions
+def check_and_play_timers():
+    try:
+        # Read timer configuration
+        with open(TIMER_FILE, 'r') as f:
+            timer_config = json.load(f)
+        
+        current_time = datetime.now()
+        current_time_str = current_time.strftime('%H:%M')
+        
+        # Check morning alarm
+        if current_time_str == timer_config.get('morning'):
+            audio = AudioSegment.from_mp3(PLAYTIME_SOUND)
+            play(audio)
+            logging.info(f"Played morning alarm at {current_time_str}")
+        
+        # Check other timers
+        for timer in timer_config.get('timers', []):
+            if current_time_str == timer:
+                audio = AudioSegment.from_mp3(PLAYTIME_SOUND)
+                play(audio)
+                logging.info(f"Played timer alarm at {current_time_str}")
+                
+    except Exception as e:
+        logging.error(f"Error checking timers: {e}")
+
 # Main conversation loop
 try:
     wait_for_wake_word = True
+    last_timer_check = datetime.now()
+    
     while True:
+        # Check timers every minute
+        current_time = datetime.now()
+        if (current_time - last_timer_check).seconds >= 60:
+            check_and_play_timers()
+            last_timer_check = current_time
+            
         user_input = get_audio_input(wait_for_wake_word)
         if user_input:
             if user_input.lower() == "restart":
