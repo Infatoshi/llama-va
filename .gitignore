@@ -9,3 +9,4 @@ read_emails.jsonl
 temp_audio.wav
 token.pickle
 calendar_token.pickle
+.DS_Store
